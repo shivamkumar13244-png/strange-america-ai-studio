@@ -45,6 +45,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(
+            "🎬 Tell me your documentary topic!\n\n"
+            "Example:\n"
+            "/make Bodie Ghost Town"
+        )
+        return
+
+    topic = " ".join(context.args)
+
+    await update.message.reply_text(
+        f"🎥 DOCUMENTARY REQUEST RECEIVED!\n\n"
+        f"📌 Topic: {topic}\n\n"
+        "🚀 Your documentary project is registered!\n"
+        "The AI production engine is the next feature "
+        "we need to connect."
+    )
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚀 Idea received!\nAI production features are coming soon."
