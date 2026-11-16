@@ -53,7 +53,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("help", help_command))
-telegram_app.add_handler(
+telegram_app.add_handler(CommandHandler("make", make_command))
     MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
 )
 
