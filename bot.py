@@ -45,29 +45,103 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
 async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            "🎬 Tell me your documentary topic!\n\n"
-            "Example:\n"
-            "/make Bodie Ghost Town"
+            "🎬 Tell me your documentary topic!\n"
+            "Example: /make Bodie Ghost Town"
+        )
+        return
+
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        await update.message.reply_text(
+            "❌ Gemini API key is missing in Render."
         )
         return
 
     topic = " ".join(context.args)
 
     await update.message.reply_text(
-        f"🎥 DOCUMENTARY REQUEST RECEIVED!\n\n"
-        f"📌 Topic: {topic}\n\n"
-        "🚀 Your documentary project is registered!\n"
-        "The AI production engine is the next feature "
-        "we need to connect."
+        f"🎬 Creating your documentary about: {topic}\n"
+        "🧠 Gemini AI is writing your script. Please wait..."
     )
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🚀 Idea received!\nAI production features are coming soon."
+    prompt = f"""
+You are the lead documentary scriptwriter for STRANGE AMERICA.
+
+Create an engaging, original English-language YouTube documentary
+about: {topic}
+
+Requirements:
+- Write a compelling opening hook.
+- Create a detailed narration with clear sections.
+- Use an atmospheric, cinematic American documentary tone.
+- Include scene suggestions in [VISUAL] labels.
+- Include narration in [VOICEOVER] labels.
+- Keep historical claims accurate.
+- Never invent dates, quotations, people or events.
+- If a fact needs verification, mark it [VERIFY FACT].
+- End with a memorable conclusion.
+
+Target length: approximately 1000-1200 words.
+This is an original script, not copied from another creator.
+"""
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/"
+        "models/gemini-3.8-flash:generateContent"
     )
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(
+                url,
+                headers={"x-goog-api-key": api_key},
+                json={
+                    "contents": [
+                        {"parts": [{"text": prompt}]}
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 5000
+                    }
+                }
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+        parts = data["candidates"][0]["content"]["parts"]
+        script = "\n".join(
+            part.get("text", "") for part in parts
+        ).strip()
+
+        if not script:
+            raise ValueError("Gemini returned an empty response.")
+
+        await update.message.reply_text(
+            "✅ YOUR DOCUMENTARY SCRIPT IS READY!"
+        )
+
+        for i in range(0, len(script), 3500):
+            await update.message.reply_text(script[i:i + 3500])
+
+    except httpx.HTTPStatusError as error:
+        print("Gemini API error:", error.response.text)
+        await update.message.reply_text(
+            f"❌ Gemini API error: HTTP {error.response.status_code}. "
+            "Check your API key, model access and free-tier limits."
+        )
+
+    except Exception as error:
+        print("Documentary generation error:", repr(error))
+        await update.message.reply_text(
+            "❌ Script generation failed. Check Render Logs."
+        )
+
 
 
 
