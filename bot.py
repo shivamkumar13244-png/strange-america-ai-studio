@@ -46,6 +46,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🎬 Welcome to STRANGE AMERICA AI STUDIO!\n"
+        "Use /make followed by your documentary topic.\n"
+        "Example: /make Bodie Ghost Town"
+    )
+
 async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
