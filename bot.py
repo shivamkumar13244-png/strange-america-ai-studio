@@ -1,10 +1,13 @@
 
 import os
 import secrets
+import logging
 from contextlib import asynccontextmanager
+
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -14,46 +17,62 @@ from telegram.ext import (
     filters,
 )
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+# ---------------- CONFIGURATION ----------------
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+RENDER_URL = (
+    os.getenv("RENDER_EXTERNAL_URL")
+    or os.getenv("RENDER_URL")
+)
+
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or secrets.token_urlsafe(32)
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
+logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing!")
+    raise RuntimeError("BOT_TOKEN is missing in Render environment.")
 
 if not RENDER_URL:
-    raise RuntimeError("RENDER_EXTERNAL_URL is missing!")
+    raise RuntimeError("RENDER_EXTERNAL_URL is missing.")
 
-WEBHOOK_SECRET = secrets.token_urlsafe(32)
 
-telegram_app = Application.builder().token(BOT_TOKEN).build()
-
+# ---------------- TELEGRAM COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎬 Welcome to STRANGE AMERICA AI STUDIO!\n\n"
-        "Your documentary studio is online!\n\n"
-        "Send /help to see commands."
+        "Your AI documentary studio is ready.\n\n"
+        "Use:\n"
+        "/make Bodie Ghost Town\n\n"
+        "To create a documentary script."
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎥 STRANGE AMERICA AI STUDIO\n\n"
+        "📚 STRANGE AMERICA AI STUDIO HELP\n\n"
         "/start - Start the bot\n"
-        "/help - Show commands\n\n"
-        "More AI production features are coming soon!"
+        "/help - Show help\n"
+        "/make Topic - Generate a documentary script\n\n"
+        "Example:\n"
+        "/make Bodie Ghost Town"
     )
 
 
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎬 Welcome to STRANGE AMERICA AI STUDIO!\n"
-        "Use /make followed by your documentary topic.\n"
-        "Example: /make Bodie Ghost Town"
-    )
+# ---------------- GEMINI DOCUMENTARY ENGINE ----------------
 
 async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    logger.info("MAKE COMMAND STARTED")
+
     if not context.args:
         await update.message.reply_text(
             "🎬 Tell me your documentary topic!\n"
@@ -61,9 +80,7 @@ async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    api_key = os.getenv("GEMINI_API_KEY")
-
-    if not api_key:
+    if not GEMINI_API_KEY:
         await update.message.reply_text(
             "❌ Gemini API key is missing in Render."
         )
@@ -72,29 +89,33 @@ async def make_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topic = " ".join(context.args)
 
     await update.message.reply_text(
-        f"🎬 Creating your documentary about: {topic}\n"
+        f"🎬 Creating your documentary about: {topic}\n\n"
         "🧠 Gemini AI is writing your script. Please wait..."
     )
 
     prompt = f"""
-You are the lead documentary scriptwriter for STRANGE AMERICA.
+You are the lead documentary writer for STRANGE AMERICA.
 
-Create an engaging, original English-language YouTube documentary
+Create an original, engaging English-language YouTube documentary
 about: {topic}
 
 Requirements:
-- Write a compelling opening hook.
-- Create a detailed narration with clear sections.
-- Use an atmospheric, cinematic American documentary tone.
-- Include scene suggestions in [VISUAL] labels.
-- Include narration in [VOICEOVER] labels.
-- Keep historical claims accurate.
-- Never invent dates, quotations, people or events.
-- If a fact needs verification, mark it [VERIFY FACT].
-- End with a memorable conclusion.
+
+1. Write a powerful opening hook.
+2. Create a detailed documentary narration.
+3. Divide the story into clear sections.
+4. Use cinematic American documentary storytelling.
+5. Include [VISUAL] scene suggestions.
+6. Include [VOICEOVER] narration.
+7. Include [MUSIC] and [SFX] suggestions.
+8. Keep historical claims accurate.
+9. Never invent dates, quotations, people or events.
+10. Mark uncertain information as [VERIFY FACT].
+11. End with a memorable conclusion.
 
 Target length: approximately 1000-1200 words.
-This is an original script, not copied from another creator.
+
+Make the script original and copyright-safe.
 """
 
     url = (
@@ -104,12 +125,19 @@ This is an original script, not copied from another creator.
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
+
             response = await client.post(
                 url,
-                headers={"x-goog-api-key": api_key},
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY
+                },
                 json={
                     "contents": [
-                        {"parts": [{"text": prompt}]}
+                        {
+                            "parts": [
+                                {"text": prompt}
+                            ]
+                        }
                     ],
                     "generationConfig": {
                         "temperature": 0.7,
@@ -121,49 +149,94 @@ This is an original script, not copied from another creator.
             response.raise_for_status()
             data = response.json()
 
-        parts = data["candidates"][0]["content"]["parts"]
+        candidates = data.get("candidates", [])
+
+        if not candidates:
+            raise ValueError(
+                "Gemini returned no candidates."
+            )
+
+        parts = candidates[0]["content"]["parts"]
+
         script = "\n".join(
-            part.get("text", "") for part in parts
+            part.get("text", "")
+            for part in parts
         ).strip()
 
         if not script:
-            raise ValueError("Gemini returned an empty response.")
+            raise ValueError("Gemini returned an empty script.")
 
         await update.message.reply_text(
-            "✅ YOUR DOCUMENTARY SCRIPT IS READY!"
+            "✅ YOUR DOCUMENTARY SCRIPT IS READY!\n\n"
+            f"📌 Topic: {topic}"
         )
 
         for i in range(0, len(script), 3500):
-            await update.message.reply_text(script[i:i + 3500])
+            await update.message.reply_text(
+                script[i:i + 3500]
+            )
+
+        logger.info("DOCUMENTARY SCRIPT GENERATED SUCCESSFULLY")
 
     except httpx.HTTPStatusError as error:
-        print("Gemini API error:", error.response.text)
+
+        logger.error(
+            "Gemini HTTP error: %s",
+            error.response.text
+        )
+
         await update.message.reply_text(
-            f"❌ Gemini API error: HTTP {error.response.status_code}. "
-            "Check your API key, model access and free-tier limits."
+            f"❌ Gemini API error: HTTP {error.response.status_code}.\n"
+            "Check your API key, model access and free-tier quota."
         )
 
     except Exception as error:
-        print("Documentary generation error:", repr(error))
+
+        logger.exception("DOCUMENTARY GENERATION FAILED")
+
         await update.message.reply_text(
-            "❌ Script generation failed. Check Render Logs."
+            "❌ Script generation failed.\n"
+            "Please check Render Logs."
         )
 
 
+# ---------------- NORMAL TEXT MESSAGES ----------------
 
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = update.message.text
+
+    logger.info("NORMAL MESSAGE RECEIVED: %s", text)
+
+    await update.message.reply_text(
+        "🚀 Idea received!\n"
+        "AI production features are coming soon."
+    )
+
+
+# ---------------- TELEGRAM APPLICATION ----------------
+
+telegram_app = Application.builder().token(BOT_TOKEN).build()
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("help", help_command))
 telegram_app.add_handler(CommandHandler("make", make_command))
 
 telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
+    MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        message_handler
+    )
 )
 
 
+# ---------------- FASTAPI WEBHOOK ----------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
+    logger.info("Starting STRANGE AMERICA AI STUDIO")
+
     await telegram_app.initialize()
     await telegram_app.start()
 
@@ -173,10 +246,14 @@ async def lifespan(app: FastAPI):
         drop_pending_updates=True,
     )
 
+    logger.info("TELEGRAM WEBHOOK CONNECTED SUCCESSFULLY")
+
     yield
 
     await telegram_app.stop()
     await telegram_app.shutdown()
+
+    logger.info("BOT STOPPED")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -184,20 +261,48 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def home():
-    return {"status": "STRANGE AMERICA AI STUDIO is running!"}
+
+    return {
+        "status": "STRANGE AMERICA AI STUDIO is running!"
+    }
 
 
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
+
     supplied_secret = request.headers.get(
-        "X-Telegram-Bot-Api-Secret-Token", ""
+        "X-Telegram-Bot-Api-Secret-Token",
+        ""
     )
 
-    if not secrets.compare_digest(supplied_secret, WEBHOOK_SECRET):
+    if not secrets.compare_digest(
+        supplied_secret,
+        WEBHOOK_SECRET
+    ):
         return Response(status_code=403)
 
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
+    try:
+        data = await request.json()
 
-    return JSONResponse({"ok": True})
+        logger.info(
+            "INCOMING TELEGRAM UPDATE: %s",
+            data.get("update_id")
+        )
+
+        update = Update.de_json(
+            data,
+            telegram_app.bot
+        )
+
+        await telegram_app.process_update(update)
+
+        return JSONResponse({"ok": True})
+
+    except Exception:
+
+        logger.exception("TELEGRAM WEBHOOK FAILED")
+
+        return JSONResponse(
+            {"ok": False},
+            status_code=500
+        )
